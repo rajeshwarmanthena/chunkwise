@@ -1,0 +1,42 @@
+# Rust build output
+target/
+fuzz/target/
+
+# Fuzzing: generated inputs and crash files (copy any real crash into tests as a regression test)
+fuzz/corpus/
+fuzz/artifacts/
+fuzz/coverage/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Compiled extension and build artifacts (from maturin)
+*.so
+*.pyd
+*.dylib
+dist/
+build/
+wheels/
+
+# Benchmarks / local output
+*.prof
+*.log
+
+# Editors and OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit)
+.env
+.env.*
+!.env.example

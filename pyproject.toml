@@ -1,0 +1,29 @@
+[build-system]
+requires = ["maturin>=1.5,<2.0"]
+build-backend = "maturin"
+
+[project]
+name = "chunkwise"
+description = "Fast, deterministic, parallel text chunking for RAG pipelines (Rust core)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+keywords = ["rag", "chunking", "text-splitter", "llm", "nlp"]
+classifiers = [
+  "Programming Language :: Rust",
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: Apache Software License",
+  "Typing :: Typed",
+]
+dynamic = ["version"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "maturin>=1.5,<2.0"]
+
+[tool.maturin]
+python-source = "python"
+module-name = "chunkwise._core"
+features = ["python"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

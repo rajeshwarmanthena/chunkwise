@@ -1,0 +1,31 @@
+[package]
+name = "chunkwise"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.75"
+description = "Fast, deterministic, parallel text chunking for RAG pipelines (Rust core, Python bindings)."
+license = "Apache-2.0"
+readme = "README.md"
+keywords = ["rag", "chunking", "text-splitter", "nlp", "llm"]
+categories = ["text-processing"]
+exclude = ["fuzz/", "benchmarks/", ".github/", "docs/", "tests/"]
+
+[lib]
+name = "chunkwise"
+crate-type = ["cdylib", "rlib"]
+
+[features]
+default = []
+# Builds the Python extension module. Off by default so `cargo test` is pure Rust.
+python = ["dep:pyo3"]
+
+[dependencies]
+rayon = "1.10"
+unicode-segmentation = "1.11"
+pyo3 = { version = "0.22", optional = true, features = ["extension-module", "abi3-py310"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+opt-level = 3
+strip = true
