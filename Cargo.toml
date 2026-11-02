@@ -9,6 +9,8 @@ readme = "README.md"
 keywords = ["rag", "chunking", "text-splitter", "nlp", "llm"]
 categories = ["text-processing"]
 exclude = ["fuzz/", "benchmarks/", ".github/", "docs/", "tests/"]
+repository = "https://github.com/rajeshwarmanthena/chunkwise"
+homepage = "https://github.com/rajeshwarmanthena/chunkwise"
 
 [lib]
 name = "chunkwise"

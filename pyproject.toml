@@ -20,6 +20,10 @@ dynamic = ["version"]
 [project.optional-dependencies]
 dev = ["pytest>=8", "maturin>=1.5,<2.0"]
 
+[project.urls]
+Repository = "https://github.com/rajeshwarmanthena/chunkwise"
+Issues = "https://github.com/rajeshwarmanthena/chunkwise/issues"
+
 [tool.maturin]
 python-source = "python"
 module-name = "chunkwise._core"
