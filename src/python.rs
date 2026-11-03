@@ -4,7 +4,7 @@ use pyo3::prelude::*;
 
 /// A chunk of text. `start`/`end` are character offsets into the source string,
 /// so `source[chunk.start:chunk.end] == chunk.text`.
-#[pyclass(frozen, get_all, module = "chunkwise")]
+#[pyclass(frozen, get_all, module = "chunkwise", skip_from_py_object)]
 #[derive(Clone, Debug)]
 pub struct Chunk {
     text: String,
@@ -69,9 +69,7 @@ fn chunk_text(
     strategy: &str,
 ) -> PyResult<Vec<Chunk>> {
     let cfg = make_config(chunk_size, chunk_overlap, strategy)?;
-    let out = py
-        .allow_threads(|| core::chunk(text, &cfg))
-        .map_err(to_py_err)?;
+    let out = py.detach(|| core::chunk(text, &cfg)).map_err(to_py_err)?;
     Ok(out.into_iter().map(Chunk::from).collect())
 }
 
@@ -87,7 +85,7 @@ fn chunk_texts(
 ) -> PyResult<Vec<Vec<Chunk>>> {
     let cfg = make_config(chunk_size, chunk_overlap, strategy)?;
     let out = py
-        .allow_threads(|| core::chunk_many(&texts, &cfg))
+        .detach(|| core::chunk_many(&texts, &cfg))
         .map_err(to_py_err)?;
     Ok(out
         .into_iter()
