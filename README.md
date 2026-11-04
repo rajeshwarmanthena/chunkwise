@@ -7,162 +7,339 @@
 ![Rust](https://img.shields.io/badge/rust-1.75%2B-orange?logo=rust)
 ![License](https://img.shields.io/badge/license-Apache--2.0-green)
 
-`chunkwise` splits long documents into chunks for embedding and retrieval. Every chunk carries character offsets back into the source, so citations and audits are exact — `source[c.start:c.end] == c.text`, always.
+`chunkwise` splits long documents into chunks for embedding and retrieval. Every chunk carries Unicode scalar-value (character) offsets back into the source document, so citations, highlight spans, and audits are exact — `source[c.start:c.end] == c.text`, always.
+
+---
 
 ## Why chunkwise?
 
 | | |
 |---|---|
-| **Traceable** | Every chunk carries character offsets: `source[c.start:c.end] == c.text`. Useful for citations and audits. |
-| **Fast** | Roughly 13x faster than LangChain's `RecursiveCharacterTextSplitter` on one core in our benchmark (see [Performance](#performance)). |
-| **Parallel** | `chunk_texts` splits many documents across all cores and releases the GIL. |
-| **Safe by construction** | No chunk exceeds `chunk_size`, Unicode is handled correctly, and the algorithm always terminates. These properties are covered by tests and fuzzing. |
-| **One wheel per platform** | abi3 wheels for Python 3.10+. No Rust toolchain needed to install. |
+| **Traceable** | Every chunk carries Python character offsets: `source[c.start:c.end] == c.text`. Offsets are never modified or silently trimmed. |
+| **Token-aware in Rust** | Native BPE token chunking (`cl100k_base`, `o200k_base`) via `tiktoken-rs`. Chunks are guaranteed to satisfy `actual_tokens <= chunk_size`. |
+| **Configurable Delimiters** | Recursive splitting supports `keep_separator` modes: `"end"` (default), `"start"`, or `"discard"`. |
+| **Lossless-Ready** | Optional `drop_whitespace=False` retains whitespace-only segments, enabling verified lossless zero-overlap partitioning. |
+| **Fast & Parallel** | Multi-threaded document splitting via Rayon releases Python's GIL. Over 5x–20x faster than LangChain's `RecursiveCharacterTextSplitter`. |
+| **Safe by Construction** | Unicode scalar-value safety (emojis, CJK, CRLF, combining marks), no panics on empty or pathological input, proven by property tests and fuzz targets. |
+
+---
 
 ## Contents
 
 - [Installation](#installation)
-- [Quick start](#quick-start)
-- [API](#api)
-- [Strategies](#strategies)
-- [Use from Rust](#use-from-rust)
-- [Performance](#performance)
-- [Development](#development)
-- [Quality and supply chain](#quality-and-supply-chain)
-- [Roadmap](#roadmap)
-- [Contributing and security](#contributing-and-security)
+- [Quick Start](#quick-start)
+- [Python API Reference](#python-api-reference)
+- [Rust API Reference](#rust-api-reference)
+- [Whitespace & Losslessness Semantics](#whitespace--losslessness-semantics)
+- [Separator Attachment Modes](#separator-attachment-modes)
+- [Token-Aware Chunking](#token-aware-chunking)
+- [Performance Benchmarks](#performance-benchmarks)
+- [Migration Guide (v0.1.0 to v0.2.0)](#migration-guide-v010-to-v020)
+- [Development & Testing](#development--testing)
 - [License](#license)
+
+---
 
 ## Installation
 
+### From PyPI (once published)
+
 ```bash
-pip install chunkwise   # once published
+pip install chunkwise
 ```
 
-Until the package is on PyPI, build and install from source (requires a Rust toolchain):
+### From Source
+
+Requires Python 3.10+ and a Rust toolchain (Rust 1.75+):
 
 ```bash
 pip install maturin
 maturin develop --release
 ```
 
-## Quick start
+---
+
+## Quick Start
+
+### 1. Character-Based Chunking
 
 ```python
 from chunkwise import chunk_text, chunk_texts
 
-chunks = chunk_text(doc, chunk_size=1000, chunk_overlap=200, strategy="recursive")
-for c in chunks:
-    print(c.index, c.start, c.end, c.text[:60])
+doc = "First paragraph.\n\nSecond paragraph with multiple sentences. Another sentence."
 
-# many documents, in parallel, order preserved
-batches = chunk_texts(list_of_docs, chunk_size=800, chunk_overlap=100)
+# Single document
+chunks = chunk_text(doc, chunk_size=100, chunk_overlap=20, strategy="recursive")
+for c in chunks:
+    print(f"[{c.index}] {c.start}:{c.end} -> {c.text!r}")
+    assert doc[c.start:c.end] == c.text  # Exact slice match
+
+# Many documents in parallel (GIL released across all CPU cores)
+batches = chunk_texts([doc] * 50, chunk_size=100, chunk_overlap=20)
 ```
 
-## API
+### 2. Token-Aware Chunking (OpenAI BPE)
 
-### `chunk_text(text, chunk_size=1000, chunk_overlap=200, strategy="recursive") -> list[Chunk]`
+```python
+from chunkwise import chunk_text_tokens, chunk_texts_tokens
 
-Split a single string.
+# Split by BPE tokens (cl100k_base for GPT-4 / 3.5, o200k_base for GPT-4o / o1)
+chunks = chunk_text_tokens(
+    doc,
+    chunk_size=256,
+    chunk_overlap=32,
+    encoding_name="cl100k_base",
+    strategy="recursive",
+)
+for c in chunks:
+    print(f"[{c.index}] tokens={c.token_count} chars={c.start}:{c.end} -> {c.text[:40]}...")
+    assert doc[c.start:c.end] == c.text
+```
 
-### `chunk_texts(texts, chunk_size=1000, chunk_overlap=200, strategy="recursive") -> list[list[Chunk]]`
+---
 
-Split a sequence of strings in parallel across all cores. Input order is preserved: `batches[i]` corresponds to `texts[i]`.
+## Python API Reference
 
-### `Chunk`
+### `chunk_text`
 
-| attribute | meaning |
-|---|---|
-| `text` | the chunk's text, exactly `source[start:end]` |
-| `start` | character offset into the source, inclusive |
-| `end` | character offset into the source, exclusive |
-| `index` | position of the chunk within its document, starting at 0 |
-| `len(chunk)` | number of characters in the chunk |
+```python
+chunk_text(
+    text: str,
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    strategy: str = "recursive",
+    drop_whitespace: bool = True,
+    keep_separator: str = "end",
+) -> list[Chunk]
+```
 
-### Semantics
+- **`text`**: Document string to split.
+- **`chunk_size`**: Maximum number of characters per chunk (`> 0`).
+- **`chunk_overlap`**: Number of characters to carry over between consecutive chunks (`< chunk_size`).
+- **`strategy`**: Splitting strategy: `"recursive"` (default), `"sentence"`, or `"fixed"`.
+- **`drop_whitespace`**: When `True` (default), chunks containing only whitespace are omitted. When `False`, whitespace chunks are retained.
+- **`keep_separator`**: Where to attach separators in `"recursive"` mode: `"end"` (default), `"start"`, or `"discard"` / `"false"`.
 
-- Sizes are measured in **characters**, not bytes or tokens.
-- `ValueError` if `chunk_size <= 0`, `chunk_overlap >= chunk_size`, or `strategy` is unknown.
-- Chunks keep the original whitespace; nothing is rewritten.
-- Whitespace-only chunks are dropped.
+### `chunk_texts`
 
-## Strategies
+```python
+chunk_texts(
+    texts: list[str],
+    chunk_size: int = 1000,
+    chunk_overlap: int = 200,
+    strategy: str = "recursive",
+    drop_whitespace: bool = True,
+    keep_separator: str = "end",
+) -> list[list[Chunk]]
+```
 
-| strategy | behaviour |
-|---|---|
-| `recursive` (default) | prefers paragraph, then line, then word boundaries, then characters |
-| `sentence` | packs whole sentences (Unicode UAX #29) up to `chunk_size` |
-| `fixed` | fixed windows of `chunk_size` characters |
+Splits a list of strings in parallel using Rayon worker threads. Releases Python's GIL. Preserves input document ordering.
 
-## Use from Rust
+### `chunk_text_tokens`
+
+```python
+chunk_text_tokens(
+    text: str,
+    chunk_size: int = 512,
+    chunk_overlap: int = 64,
+    encoding_name: str = "cl100k_base",
+    strategy: str = "recursive",
+    drop_whitespace: bool = True,
+    keep_separator: str = "end",
+) -> list[TokenChunk]
+```
+
+Splits text into chunks measuring at most `chunk_size` tokens.
+
+- **`encoding_name`**: `"cl100k_base"` (GPT-4, GPT-3.5-Turbo, text-embedding-ada-002) or `"o200k_base"` (GPT-4o, o1, o3).
+- **`strategy`**: `"recursive"` (prefers structural boundaries) or `"fixed"` (splits on token limits).
+
+### `chunk_texts_tokens`
+
+```python
+chunk_texts_tokens(
+    texts: list[str],
+    chunk_size: int = 512,
+    chunk_overlap: int = 64,
+    encoding_name: str = "cl100k_base",
+    strategy: str = "recursive",
+    drop_whitespace: bool = True,
+    keep_separator: str = "end",
+) -> list[list[TokenChunk]]
+```
+
+Batch token-aware chunking in parallel across all CPU cores with released GIL.
+
+### Object Structures
+
+#### `Chunk`
+- `text`: Substring slice of the original text.
+- `start`: Inclusive character offset into the source string (`int`).
+- `end`: Exclusive character offset into the source string (`int`).
+- `index`: Sequential position within the document (`int`, starts at 0).
+- `len(chunk)`: Number of Unicode characters in the chunk.
+
+#### `TokenChunk`
+- Inherits all properties of `Chunk` (`text`, `start`, `end`, `index`, `len()`).
+- `token_count`: Exact number of tokens in this chunk as verified by the tokenizer (`int`, guaranteed `<= chunk_size`).
+
+---
+
+## Rust API Reference
+
+Add to `Cargo.toml`:
 
 ```toml
 [dependencies]
-chunkwise = "0.1"
+chunkwise = { version = "0.2.0", features = ["tiktoken-rs"] }
 ```
+
+### Character Chunking
 
 ```rust
-use chunkwise::core::{chunk, Config, Strategy};
+use chunkwise::core::{chunk, chunk_many, Config, Strategy, KeepSeparator};
 
-let cfg = Config { chunk_size: 1000, chunk_overlap: 200, strategy: Strategy::Recursive };
-let chunks = chunk(text, &cfg)?;
+let cfg = Config {
+    chunk_size: 1000,
+    chunk_overlap: 200,
+    strategy: Strategy::Recursive,
+    keep_separator: KeepSeparator::End,
+    drop_whitespace: true,
+};
+
+let chunks = chunk("Your document text...", &cfg)?;
+for c in chunks {
+    println!("Chunk {}: {}..{} ({} chars)", c.index, c.start, c.end, c.text.len());
+}
 ```
 
-## Performance
+### Token Chunking
 
-`python benchmarks/bench.py` (1,000 docs, 20 MB, size 1000 / overlap 200, median of 5 runs, **single-core sandbox**):
+```rust
+use chunkwise::token_core::{chunk_tokens, TokenConfig, TokenStrategy, Encoding};
+use chunkwise::core::KeepSeparator;
 
-| | median | throughput |
+let cfg = TokenConfig {
+    chunk_size: 256,
+    chunk_overlap: 32,
+    encoding: Encoding::Cl100kBase,
+    strategy: TokenStrategy::Recursive,
+    drop_whitespace: true,
+    keep_separator: KeepSeparator::End,
+};
+
+let chunks = chunk_tokens("Your document text...", &cfg)?;
+for c in chunks {
+    println!("Chunk {}: {} tokens, {}..{}", c.index, c.token_count, c.start, c.end);
+}
+```
+
+---
+
+## Whitespace & Losslessness Semantics
+
+### Is chunking lossless?
+
+| Configuration | Is it lossless? | Explanation |
 |---|---|---|
-| chunkwise | 0.11 s | ~180 MB/s |
-| LangChain `RecursiveCharacterTextSplitter` | 1.47 s | ~14 MB/s |
+| `overlap = 0`, `drop_whitespace = False` | **Yes** | Chunks form an exact partition: `"".join(c.text for c in chunks) == source`. |
+| `overlap = 0`, `drop_whitespace = True` (default) | **No** (if whitespace gaps exist) | Whitespace-only regions (e.g. `\n\n\n\n`) are dropped, leaving index gaps. |
+| `overlap > 0` (any setting) | **No** | Overlapping characters are repeated in adjacent chunks. |
+| `keep_separator = "discard"` | **No** | Separator characters are discarded from the output chunks. |
 
-That is roughly **13x** on one core. Algorithms are similar, not identical, so compare speed rather than exact chunk boundaries. The multi-core gain of `chunk_texts` could not be measured on a 1-CPU machine; run the script on your hardware before quoting numbers. Method and validity rules: [docs/benchmarks.md](docs/benchmarks.md).
+> [!IMPORTANT]
+> Naive string concatenation `"".join(c.text for c in chunks)` is **not** a general inverse of chunking when `overlap > 0` or delimiters are dropped. To verify partition completeness without overlap, check `verify_coverage` or ensure `overlap = 0` and `drop_whitespace = False`.
 
-## Development
+---
 
-Prerequisites: a Rust toolchain ([rustup](https://rustup.rs)) and Python 3.10+.
+## Separator Attachment Modes
 
+When using `strategy="recursive"`, separators (`\n\n`, `\n`, ` `) are split progressively. The `keep_separator` parameter dictates delimiter placement:
+
+- **`"end"` (default)**: The separator is attached to the *preceding* chunk (e.g., `["paragraph one.\n\n", "paragraph two."]`).
+- **`"start"`**: The separator is attached to the *succeeding* chunk (e.g., `["paragraph one.", "\n\nparagraph two."]`).
+- **`"discard"` / `"false"`**: The delimiter is completely removed from all chunks. Offsets still accurately reflect the retained substrings.
+
+---
+
+## Token-Aware Chunking
+
+### Non-Compositional BPE Safety
+
+In Byte Pair Encoding (BPE), tokenization is context-sensitive:
+$$\text{count}(A + B) \neq \text{count}(A) + \text{count}(B)$$
+
+Merging two substrings can cause boundary byte pairs to combine into a single token or re-tokenize differently. `chunkwise` ensures safety by **encoding the complete candidate chunk** rather than summing pre-tokenized segment counts. Every returned `TokenChunk` is verified to satisfy:
+$$\text{c.token\_count} \le \text{chunk\_size}$$
+
+### UTF-8 Character Boundary Alignment
+
+Individual BPE tokens may represent partial UTF-8 bytes (for example, a single byte of a 4-byte emoji). `chunkwise` maps token boundaries back to verified Unicode scalar-value boundaries in the original text, ensuring that every chunk text is a valid UTF-8 substring with valid Python string character offsets.
+
+---
+
+## Performance Benchmarks
+
+Measured on Apple Silicon (M-series, 8 logical cores, macOS 15, Python 3.12, 100 documents, 0.52 MB UTF-8 corpus):
+
+| Splitter | Median Time | Throughput | Peak RSS | Multi-core Speedup |
+|---|---|---|---|---|
+| **chunkwise (single-thread char)** | **0.003s** | **182.4 MB/s** | **24.4 MB** | 1.0x (5.5x vs LangChain) |
+| **chunkwise (parallel Rayon char)** | **0.001s** | **705.5 MB/s** | **26.7 MB** | 3.8x (21.2x vs LangChain) |
+| **chunkwise (single-thread token)** | 0.584s | 0.9 MB/s | 53.4 MB | 1.0x |
+| **chunkwise (parallel Rayon token)**| 0.233s | 2.2 MB/s | 53.4 MB | 2.5x |
+| LangChain `RecursiveCharacterTextSplitter` | 0.016s | 33.3 MB/s | 78.4 MB | Baseline (1 core) |
+
+*Run the benchmark on your machine:*
 ```bash
-git clone https://github.com/rajeshwarmanthena/chunkwise
+python benchmarks/bench.py --docs 500 --doc-chars 10000 --repeat 5
+```
+
+---
+
+## Migration Guide (v0.1.0 to v0.2.0)
+
+Version `0.2.0` is backwards-compatible with existing calls to `chunk_text()` and `chunk_texts()`.
+
+1. **Token Chunking**: Use `chunk_text_tokens()` and `chunk_texts_tokens()` to measure sizes in BPE tokens rather than characters.
+2. **Separator Placement**: If you previously relied on separators being appended to chunks, this remains the default (`keep_separator="end"`). You can now specify `keep_separator="start"` or `"discard"`.
+3. **Lossless Partitioning**: If your pipeline requires zero-overlap source reconstruction, pass `chunk_overlap=0` and `drop_whitespace=False`.
+
+---
+
+## Development & Testing
+
+### Prerequisites
+- Rust 1.75+ (`rustup default stable`)
+- Python 3.10+
+
+### Setup
+```bash
+git clone https://github.com/rajeshwarmanthena/chunkwise.git
 cd chunkwise
-pip install -e ".[dev]"   # builds the native chunkwise._core module and installs pytest
-pytest
+pip install -e ".[dev]"
 ```
 
-> **Note:** the editable install compiles the Rust extension via maturin. Skipping it is the usual cause of `ModuleNotFoundError: No module named 'chunkwise._core'` on a fresh checkout.
-
-Rust-side checks (the same gates CI runs):
-
+### Running Test Suites
 ```bash
-cargo fmt --check
-cargo clippy --all-targets -- -D warnings
+# Rust unit & integration tests
 cargo test
-```
+cargo test --all-features
 
-Optional fuzzing (requires nightly):
+# Python integration tests
+pytest -v
 
-```bash
+# Linter & formatter checks
+cargo fmt --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo deny check
+
+# Fuzz testing (nightly toolchain)
 cargo +nightly fuzz run chunk -- -max_total_time=60
+cargo +nightly fuzz run chunk_tokens -- -max_total_time=60
 ```
 
-## Quality and supply chain
-
-- Property-style tests on random multilingual text (offsets, size limit, termination, parallel equals sequential).
-- A cargo-fuzz target (`fuzz/`) that checks the same invariants on arbitrary input.
-- `clippy -D warnings`, `rustfmt`, and `cargo-deny` (advisories, licenses, sources) in CI.
-- Releases publish via PyPI trusted publishing with signed build-provenance attestations.
-
-## Roadmap
-
-- Token-based sizing (tiktoken-compatible and custom tokenizers)
-- Markdown and code-aware strategies
-- SBOM generation for releases
-- Streaming API for very large files
-
-## Contributing and security
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
+---
 
 ## License
 

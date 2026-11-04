@@ -9,11 +9,18 @@ cargo-fuzz = true
 
 [dependencies]
 libfuzzer-sys = "0.4"
-chunkwise = { path = ".." }
+chunkwise = { path = "..", features = ["tiktoken-rs"] }
 
 [[bin]]
 name = "chunk"
 path = "fuzz_targets/chunk.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "chunk_tokens"
+path = "fuzz_targets/chunk_tokens.rs"
 test = false
 doc = false
 bench = false

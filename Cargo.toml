@@ -1,6 +1,6 @@
 [package]
 name = "chunkwise"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 rust-version = "1.75"
 description = "Fast, deterministic, parallel text chunking for RAG pipelines (Rust core, Python bindings)."
@@ -20,11 +20,16 @@ crate-type = ["cdylib", "rlib"]
 default = []
 # Builds the Python extension module. Off by default so `cargo test` is pure Rust.
 python = ["dep:pyo3"]
+# Enables token-aware chunking via tiktoken-rs. Off by default to avoid the
+# compile-time cost (fancy-regex, bundled BPE tables) for users who only need
+# character-based splitting.
+tiktoken-rs = ["dep:tiktoken-rs"]
 
 [dependencies]
 rayon = "1.10"
 unicode-segmentation = "1.11"
 pyo3 = { version = "0.29", optional = true, features = ["extension-module", "abi3-py310"] }
+tiktoken-rs = { version = "0.11.0", optional = true }
 
 [profile.release]
 lto = "fat"

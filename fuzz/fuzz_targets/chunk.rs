@@ -2,11 +2,11 @@
 //! Feeds arbitrary text and parameters to every strategy and checks the invariants
 //! the library promises: no panic, chunks within `chunk_size`, offsets map back to the source.
 
-use chunkwise::core::{chunk, Config, Strategy};
+use chunkwise::core::{chunk, Config, KeepSeparator, Strategy};
 use libfuzzer_sys::fuzz_target;
 
-fuzz_target!(|input: (&str, u8, u8, u8)| {
-    let (text, size, overlap, strat) = input;
+fuzz_target!(|input: (&str, u8, u8, u8, u8, bool)| {
+    let (text, size, overlap, strat, keep_sep, drop_ws) = input;
     let size = size as usize % 200 + 1;
     let overlap = overlap as usize % size;
     let strategy = match strat % 3 {
@@ -14,12 +14,25 @@ fuzz_target!(|input: (&str, u8, u8, u8)| {
         1 => Strategy::Sentence,
         _ => Strategy::Recursive,
     };
-    let cfg = Config { chunk_size: size, chunk_overlap: overlap, strategy };
+    let keep_separator = match keep_sep % 3 {
+        0 => KeepSeparator::End,
+        1 => KeepSeparator::Start,
+        _ => KeepSeparator::Discard,
+    };
+    let cfg = Config {
+        chunk_size: size,
+        chunk_overlap: overlap,
+        strategy,
+        keep_separator,
+        drop_whitespace: drop_ws,
+    };
     let chars: Vec<char> = text.chars().collect();
     let chunks = chunk(text, &cfg).expect("valid config must not fail");
     for (i, c) in chunks.iter().enumerate() {
         assert_eq!(c.index, i);
         assert!(c.text.chars().count() <= size);
+        assert!(c.start <= c.end);
+        assert!(c.end <= chars.len());
         let slice: String = chars[c.start..c.end].iter().collect();
         assert_eq!(slice, c.text);
     }
