@@ -11,6 +11,7 @@ allow = [
   "Apache-2.0 WITH LLVM-exception",
   "Unicode-3.0",
   "Unicode-DFS-2016",
+  "Unlicense",  # rustc-hash (tiktoken-rs transitive dep)
 ]
 confidence-threshold = 0.8
 

@@ -27,7 +27,7 @@ Issues = "https://github.com/rajeshwarmanthena/chunkwise/issues"
 [tool.maturin]
 python-source = "python"
 module-name = "chunkwise._core"
-features = ["python"]
+features = ["python", "tiktoken-rs"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
